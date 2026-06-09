@@ -106,6 +106,11 @@ select:focus{outline:none;border-color:var(--p400)}
 
 .deck-card{background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:1rem 1.25rem;margin-bottom:8px;cursor:pointer;transition:all .15s;box-shadow:0 1px 4px rgba(83,74,183,.06)}
 .deck-card:hover{border-color:var(--p400);box-shadow:0 4px 12px rgba(83,74,183,.15);transform:translateY(-1px)}
+.deck-card.dragging{opacity:.4;border-color:var(--p400);transform:scale(.98)}
+.deck-card.drag-over{border-color:var(--p600);background:var(--p50);transform:translateY(-2px)}
+.deck-drag-handle{cursor:grab;color:var(--muted);padding:0 6px;font-size:16px;flex-shrink:0}
+.deck-drag-handle:active{cursor:grabbing}
+.deck-name-edit{font-size:15px;font-weight:700;color:var(--text);background:transparent;border:none;border-bottom:2px solid var(--p400);outline:none;width:100%;font-family:inherit;padding:2px 0}
 .deck-title{font-size:15px;font-weight:700;color:var(--text)}
 .deck-meta{font-size:12px;color:var(--muted);margin-top:3px}
 
@@ -437,22 +442,77 @@ function renderDecks(){
   const empty=document.getElementById('deck-empty');
   if(!state.decks.length){list.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
-  list.innerHTML=state.decks.map(d=>{
+  list.innerHTML=state.decks.map((d,i)=>{
     const cnt=state.words.filter(w=>w.deckId===d.id).length;
     const mastered=state.words.filter(w=>w.deckId===d.id&&masteryLevel(w)>=4).length;
-    return `<div class="deck-card" onclick="openDeck('${d.id}')">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-        <div>
-          <div class="deck-title">${d.name}</div>
+    return `<div class="deck-card" id="dc-${d.id}" draggable="true"
+      ondragstart="dragStart(event,'${d.id}')"
+      ondragover="dragOver(event,'${d.id}')"
+      ondragleave="dragLeave(event,'${d.id}')"
+      ondrop="dragDrop(event,'${d.id}')"
+      ondragend="dragEnd()">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="deck-drag-handle" onclick="event.stopPropagation()" title="ドラッグで並び替え">⠿</span>
+        <div style="flex:1;min-width:0">
+          <div class="deck-title" id="dtitle-${d.id}" onclick="event.stopPropagation();startEditDeck('${d.id}')">${d.name}</div>
           <div class="deck-meta">${SUBJ[d.subject]||d.subject} · ${cnt}語 · マスター ${mastered}/${cnt}</div>
         </div>
-        <div style="display:flex;gap:6px;align-items:center">
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
           <span class="badge ${d.subject==='biology'?'b-bio':'b-chem'}">${SUBJ[d.subject]||d.subject}</span>
+          <button class="bg sm" onclick="event.stopPropagation();startEditDeck('${d.id}')" title="名前を編集">✏️</button>
           <button class="bg sm dn" onclick="event.stopPropagation();deleteDeck('${d.id}')">🗑</button>
+        </div>
+      </div>
+      <div id="dedit-${d.id}" style="display:none;margin-top:8px" onclick="event.stopPropagation()">
+        <input class="deck-name-edit" id="dinput-${d.id}" value="${d.name}" onkeydown="if(event.key==='Enter')saveDeckName('${d.id}');if(event.key==='Escape')cancelEditDeck('${d.id}')">
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="bp sm" onclick="saveDeckName('${d.id}')">✓ 保存</button>
+          <button class="bg sm" onclick="cancelEditDeck('${d.id}')">キャンセル</button>
         </div>
       </div>
     </div>`;
   }).join('');
+
+  // カード全体クリックでopenDeck（編集エリア以外）
+  state.decks.forEach(d=>{
+    const card=document.getElementById('dc-'+d.id);
+    card.addEventListener('click',function(e){
+      if(e.target.closest('#dedit-'+d.id)||e.target.closest('button')||e.target.classList.contains('deck-drag-handle'))return;
+      openDeck(d.id);
+    });
+  });
+}
+
+let dragSrcId=null;
+function dragStart(e,id){dragSrcId=id;document.getElementById('dc-'+id).classList.add('dragging');e.dataTransfer.effectAllowed='move';}
+function dragOver(e,id){e.preventDefault();if(id===dragSrcId)return;document.getElementById('dc-'+id).classList.add('drag-over');}
+function dragLeave(e,id){document.getElementById('dc-'+id).classList.remove('drag-over');}
+function dragDrop(e,id){
+  e.preventDefault();
+  document.getElementById('dc-'+id).classList.remove('drag-over');
+  if(id===dragSrcId)return;
+  const srcIdx=state.decks.findIndex(d=>d.id===dragSrcId);
+  const tgtIdx=state.decks.findIndex(d=>d.id===id);
+  const [moved]=state.decks.splice(srcIdx,1);
+  state.decks.splice(tgtIdx,0,moved);
+  save();renderDecks();populateDeckSel();
+}
+function dragEnd(){dragSrcId=null;document.querySelectorAll('.deck-card').forEach(c=>c.classList.remove('dragging','drag-over'));}
+
+function startEditDeck(id){
+  document.getElementById('dedit-'+id).style.display='block';
+  document.getElementById('dtitle-'+id).style.display='none';
+  setTimeout(()=>{const inp=document.getElementById('dinput-'+id);inp.focus();inp.select();},50);
+}
+function cancelEditDeck(id){
+  document.getElementById('dedit-'+id).style.display='none';
+  document.getElementById('dtitle-'+id).style.display='block';
+}
+function saveDeckName(id){
+  const val=document.getElementById('dinput-'+id).value.trim();
+  if(!val)return;
+  const d=state.decks.find(x=>x.id===id);
+  if(d){d.name=val;save();renderDecks();populateDeckSel();toast('デッキ名を変更しました');}
 }
 
 function showNewDeck(){document.getElementById('new-deck-form').style.display='block';setTimeout(()=>document.getElementById('new-deck-name').focus(),50);}
