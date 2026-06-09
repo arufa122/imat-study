@@ -660,7 +660,7 @@ async function doAnalysis(){
     const res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:2000,messages:[{role:'user',content:userContent}]})
+      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:4000,messages:[{role:'user',content:userContent}]})
     });
     if(!res.ok){const e=await res.json();throw new Error(e.error?.message||res.statusText);}
     const data=await res.json();
@@ -669,7 +669,15 @@ async function doAnalysis(){
     const firstBrace=clean.indexOf('{');
     const lastBrace=clean.lastIndexOf('}');
     if(firstBrace!==-1&&lastBrace!==-1)clean=clean.slice(firstBrace,lastBrace+1);
-    const parsed=JSON.parse(clean);
+    let parsed;
+    try{
+      parsed=JSON.parse(clean);
+    }catch(e){
+      // JSONが途中で切れた場合、wordsの最後の不完全な要素を削除して再試行
+      const fixedClean=clean.replace(/,\s*\{[^}]*$/, '').replace(/,\s*$/, '')+']}';
+      try{parsed=JSON.parse(fixedClean);}
+      catch(e2){throw new Error('解析結果のJSON変換に失敗しました。テキストを短くして再試行してください。');}
+    }
     document.getElementById('trans-out').textContent=parsed.translation;
     document.getElementById('subj-lbl').textContent=SUBJ[subj];
     pending=parsed.words||[];
